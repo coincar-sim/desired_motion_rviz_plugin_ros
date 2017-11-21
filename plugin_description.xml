@@ -1,0 +1,10 @@
+<library path="lib/libdesired_motion_rviz_plugin_ros">
+  <class name="desired_motion_rviz_plugin_ros/DesiredMotion"
+         type="desired_motion_rviz_plugin_ros::DesiredMotionDisplay"
+         base_class_type="rviz::Display">
+    <description>
+      Displays desired motions from simulation_only_msgs/DeltaTrajectoryWithID messages.
+    </description>
+    <message_type>simulation_only_msgs/DeltaTrajectoryWithID</message_type>
+  </class>
+</library>
