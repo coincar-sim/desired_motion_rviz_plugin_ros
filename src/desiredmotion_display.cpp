@@ -1,3 +1,38 @@
+/*
+ * Copyright (c) 2017
+ * FZI Forschungszentrum Informatik, Karlsruhe, Germany (www.fzi.de)
+ * KIT, Institute of Measurement and Control, Karlsruhe, Germany (www.mrt.kit.edu)
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ * 3. Neither the name of the copyright holder nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software without
+ *    specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <assert.h>
+#include <util_automated_driving_msgs/util_automated_driving_msgs.hpp>
+#include <util_geometry_msgs/util_geometry_msgs.hpp>
+#include <util_simulation_only_msgs/util_simulation_only_msgs.hpp>
+
 #include "desiredmotion_display.hpp"
 
 namespace desired_motion_rviz_plugin_ros {
@@ -30,6 +65,13 @@ DesiredMotionDisplay::DesiredMotionDisplay() {
         this,
         SLOT(updateMaxTime()));
 
+    maxFrequencyProperty_ = std::make_unique<rviz::FloatProperty>(
+        "Maximum Frequency",
+        20.0,
+        "Maximum update frequency for delta-trajectory messages. [walltime; Hz; min. 1 Hz]",
+        this,
+        SLOT(updateMaxTime()));
+
     colorMaxTimeProperty_ = std::make_unique<rviz::FloatProperty>(
         "ColorCode Planning Horizon",
         10.0,
@@ -54,6 +96,13 @@ DesiredMotionDisplay::DesiredMotionDisplay() {
         QVariant(),
         "Set The Radii of the displayed Circles. For each object you can set the radius individually. Default = 1.0m",
         this);
+
+    plannerDebugModeProperty_ =
+        std::make_unique<rviz::BoolProperty>("PlannerDebugMode(!)",
+                                             false,
+                                             "If selected, the desired motion is always visualized at the latest "
+                                             "object state, regardless of time differences (use with caution!)",
+                                             this);
 }
 
 
@@ -62,6 +111,7 @@ DesiredMotionDisplay::~DesiredMotionDisplay() {
 }
 
 void DesiredMotionDisplay::onInitialize() {
+    updateTimeInterval();
 }
 
 void DesiredMotionDisplay::reset() {
@@ -106,15 +156,43 @@ void DesiredMotionDisplay::fixedFrameChanged() {
 
 void DesiredMotionDisplay::updateObjectProperty() {
     if (objectAllProperty_->getBool() == false) {
+        // if not all objects should be shown
         for (auto&& it : objectPropertys_) {
-            if (!it.second->getBool()) {
-                visuals_[it.first].clear();
+
+            const object_id_type& obj_id = it.first;
+
+            if (deltaTrajectorys_.find(obj_id) != deltaTrajectorys_.end() && objectInObjectStates(obj_id)) {
+                // if object could be shown, show its bool property
+                it.second->setHidden(false);
+            } else {
+                // otherwize hide the latter and set it to false
+                it.second->setBool(false);
+                it.second->setHidden(true);
             }
-            it.second->setHidden(false);
+
+            if (it.second->getBool()) {
+                // if it should be shown, show its radius property
+                radiusPropertys_[obj_id]->setHidden(false);
+            } else {
+                // otherwize hide the latter
+                radiusPropertys_[obj_id]->setHidden(true);
+            }
         }
     } else {
+        // if all objects should be shown
         for (auto&& it : objectPropertys_) {
+
+            const object_id_type& obj_id = it.first;
+
+            // hide all single booleans
             it.second->setHidden(true);
+
+            // display all radii of objects that could be displayed
+            if (deltaTrajectorys_.find(obj_id) != deltaTrajectorys_.end() && objectInObjectStates(obj_id)) {
+                radiusPropertys_[obj_id]->setHidden(false);
+            } else {
+                radiusPropertys_[obj_id]->setHidden(true);
+            }
         }
     }
 }
@@ -184,6 +262,12 @@ void DesiredMotionDisplay::updateTimeInterval() {
 void DesiredMotionDisplay::updateMaxTime() {
     maxTime_ = maxTimeProperty_->getFloat();
     maxNumberOfVisuals_ = maxTime_ / timeInterval_;
+
+    maxFrequency_ = maxFrequencyProperty_->getFloat();
+    if (maxFrequency_ < 1.) {
+        maxFrequency_ = 1.;
+        maxFrequencyProperty_->setFloat(1.);
+    }
 }
 
 void DesiredMotionDisplay::updateColorMaxTime() {
@@ -207,32 +291,73 @@ void DesiredMotionDisplay::incomingMessageDT(const simulation_only_msgs::DeltaTr
     ++messagesReceivedDT_;
     setStatus(rviz::StatusProperty::Ok, "DT-Topic", QString::number(messagesReceivedDT_) + " messages received");
     deltaTrajectorys_[msg->object_id] = msg;
+    if (plannerDebugModeProperty_->getBool()) {
+        if (objectStates_) {
+            processMessageOSA(objectStates_);
+        } else {
+            ROS_WARN_THROTTLE(1,
+                              "desired_motion_rviz_plugin_ros: Received delta trajectory but not object state array "
+                              "yet, not displaying anything!");
+        }
+    }
 }
 
 // Processes incoming ObjectStateArray message.
 void DesiredMotionDisplay::processMessageOSA(
     const automated_driving_msgs::ObjectStateArray::ConstPtr& objectStateArrayMsg) {
 
+    if ((ros::WallTime::now() - lastUpdate_).toSec() < (1 / maxFrequency_)) {
+        return;
+    }
+
+    lastUpdate_ = ros::WallTime::now();
+
     transformOk_ = true;
     transformErrorMsg_ = "";
+    size_t numberOfUpdatedVisuals = 0;
 
     // process all objects in the ObjectStateArray
     for (auto&& objectState : objectStateArrayMsg->objects) {
-        // create new Bool property to choose if object is displayed
-        // TODO detect if object is no longer there (maybe wait some time?) and delete property
-        if (objectPropertys_.count(objectState.object_id) == 0) {
-            createObjectProperty(objectState.object_id);
-        }
+        if (deltaTrajectorys_.find(objectState.object_id) != deltaTrajectorys_.end()) {
+            // if a delta trajectory exists for this object
 
-        if (objectAllProperty_->getBool() || objectPropertys_[objectState.object_id]->getBool()) {
-            // if object shall be visualized
+            if (objectPropertys_.count(objectState.object_id) == 0) {
+                // create new Bool property to choose if object is displayed if not yet there
+                // TODO detect if object is no longer there (maybe wait some time?) and delete property
+                createObjectProperty(objectState.object_id);
+            }
 
-            if (deltaTrajectorys_.find(objectState.object_id) != deltaTrajectorys_.end()) {
-                // if a delta trajectory exists for this object
+            if (objectAllProperty_->getBool() || objectPropertys_[objectState.object_id]->getBool()) {
+                // if object shall be visualized
+                bool foundAndUnique;
                 createVisuals(deltaTrajectorys_[objectState.object_id],
-                              util_perception::ObjectStateFromObjectStateArray(objectStates_, objectState.object_id));
+                              util_automated_driving_msgs::conversions::objectStateFromObjectStateArray(
+                                  objectStates_, objectState.object_id, foundAndUnique));
+                assert(foundAndUnique);
+                numberOfUpdatedVisuals++;
+            } else {
+                // else delete its visual
+                visuals_[objectState.object_id].clear();
+                visuals_.erase(objectState.object_id);
             }
         }
+    }
+
+    // delete visuals and properties of objects that are no longer present
+    if (numberOfUpdatedVisuals != visuals_.size()) {
+
+        std::vector<int> idsToDelete;
+        for (auto it : visuals_) {
+            int id = it.first;
+            if (!objectInObjectStates(id)) {
+                idsToDelete.push_back(id);
+            }
+        }
+        for (int id : idsToDelete) {
+            visuals_[id].clear();
+            visuals_.erase(id);
+        }
+        updateObjectProperty();
     }
 
     // set status of TF transformations
@@ -248,14 +373,19 @@ void DesiredMotionDisplay::createVisuals(const simulation_only_msgs::DeltaTrajec
                                          const automated_driving_msgs::ObjectState& objectState) {
 
     // get the maximum available Delta Time (important if less than maxTime_)
-    const uint32_t maxDeltaTime = deltaTrajectory->delta_poses_with_delta_time.back().delta_time.toSec();
+    if (deltaTrajectory->delta_poses_with_delta_time.empty()) {
+        ROS_WARN("desired_motion_rviz_plugin_ros: Received empty deltaTrajectory for ID %i, discarding!",
+                 deltaTrajectory->object_id);
+        return;
+    }
+    const double maxDeltaTime = deltaTrajectory->delta_poses_with_delta_time.back().delta_time.toSec();
 
     // Recalculate and Reset number of visual Elements
     const uint32_t numberOfVisuals = ((maxDeltaTime < maxTime_) ? (maxDeltaTime / timeInterval_) : maxNumberOfVisuals_);
     if (visuals_[deltaTrajectory->object_id].size() != numberOfVisuals) {
         visuals_[deltaTrajectory->object_id].clear();
         visuals_[deltaTrajectory->object_id].reserve(numberOfVisuals);
-        for (int i = 0; i < numberOfVisuals; i++) {
+        for (size_t i = 0; i < numberOfVisuals; i++) {
             visuals_[deltaTrajectory->object_id].emplace_back(std::make_shared<DesiredMotionVisual>(
                 context_->getSceneManager(), scene_node_, radiusPropertys_[deltaTrajectory->object_id]->getFloat()));
         }
@@ -266,9 +396,20 @@ void DesiredMotionDisplay::createVisuals(const simulation_only_msgs::DeltaTrajec
     // circles are displayed at fixed absolute times for better visualization
     double absoluteTimeNow, firstDeltaDisplayTime;
     absoluteTimeNow = ros::Time::now().toSec();
+    if (plannerDebugModeProperty_->getBool()) {
+        // set time now to latest object state timestamp
+        absoluteTimeNow = objectState.header.stamp.toSec();
+        bool trajectoryCompletelyInPast =
+            (absoluteTimeNow - (deltaTrajectory->header.stamp.toSec() + maxDeltaTime) > 0);
+        if (trajectoryCompletelyInPast) {
+            ROS_WARN("desired_motion_rviz_plugin_ros: Not displaying trajectory of object %i though in debug mode "
+                     "because delta trajectory lies completely in past. You might want to stop the time.",
+                     deltaTrajectory->object_id);
+        }
+    }
     firstDeltaDisplayTime = -fmod(absoluteTimeNow, timeInterval_) + timeInterval_;
-    for (int i = 0; (i * timeInterval_ <= maxTime_ && i * timeInterval_ <= maxDeltaTime &&
-                     i < visuals_[deltaTrajectory->object_id].size());
+    for (size_t i = 0; (i * timeInterval_ <= maxTime_ && i * timeInterval_ <= maxDeltaTime &&
+                        i < visuals_[deltaTrajectory->object_id].size());
          i++) {
         // createVisual(deltaTrajectory, objectState, objectState.object_id, absoluteTimeNow + currentDeltaTime);
         reCalcVisual(deltaTrajectory,
@@ -289,7 +430,13 @@ void DesiredMotionDisplay::reCalcVisual(const simulation_only_msgs::DeltaTraject
     double startDt = objectState.header.stamp.toSec() - deltaTrajectory->header.stamp.toSec();
     if (startDt < deltaTrajectory->delta_poses_with_delta_time[0].delta_time.toSec() ||
         startDt > deltaTrajectory->delta_poses_with_delta_time.back().delta_time.toSec()) {
-        return;
+        if (plannerDebugModeProperty_->getBool()) {
+            // set start time (time in deltaTrajectory list when object state arrived) to zero, if object state is older
+            // than delta trajectory (otherwize it cannot be displayed)
+            startDt = 0.0;
+        } else {
+            return;
+        }
     }
     double currentDt = currentAbsoluteTime - deltaTrajectory->header.stamp.toSec();
     if (currentDt < deltaTrajectory->delta_poses_with_delta_time[0].delta_time.toSec() ||
@@ -298,29 +445,37 @@ void DesiredMotionDisplay::reCalcVisual(const simulation_only_msgs::DeltaTraject
     }
 
     // Interpolate Start Pose
-    double scale = 0.0;
-    size_t j = 0;
-    std::tie(j, scale) = util_localization_mgmt::getInterpolationIndexAndScale(deltaTrajectorys_[objectId], startDt);
-    geometry_msgs::Pose newDeltaPoseStart =
-        util_localization_mgmt::interpolatePose(deltaTrajectory->delta_poses_with_delta_time[j].delta_pose,
-                                                deltaTrajectory->delta_poses_with_delta_time[j + 1].delta_pose,
-                                                scale);
+    geometry_msgs::Pose newDeltaPoseStart;
+    bool valid;
+    std::string errMsg;
+    util_simulation_only_msgs::interpolateDeltaPose(
+        deltaTrajectorys_[objectId], objectState.header.stamp, newDeltaPoseStart, valid, errMsg);
+    if (!valid) {
+        transformOk_ = false;
+        transformErrorMsg_ = "Latest Error: Obj:" + std::to_string(objectState.object_id) + ": " + errMsg;
+        visual->setVisible(false);
+        return;
+    }
 
     // Interpolate Current Pose
-    scale = 0.0;
-    j = 0;
-    std::tie(j, scale) = util_localization_mgmt::getInterpolationIndexAndScale(deltaTrajectorys_[objectId], currentDt);
-    geometry_msgs::Pose newDeltaPose =
-        util_localization_mgmt::interpolatePose(deltaTrajectory->delta_poses_with_delta_time[j].delta_pose,
-                                                deltaTrajectory->delta_poses_with_delta_time[j + 1].delta_pose,
-                                                scale);
+    geometry_msgs::Pose newDeltaPose;
+    ros::Time currentAbsoluteTimestamp;
+    currentAbsoluteTimestamp.fromSec(currentAbsoluteTime);
+    util_simulation_only_msgs::interpolateDeltaPose(
+        deltaTrajectorys_[objectId], currentAbsoluteTimestamp, newDeltaPose, valid, errMsg);
+    if (!valid) {
+        transformOk_ = false;
+        transformErrorMsg_ = "Latest Error: Obj:" + std::to_string(objectState.object_id) + ": " + errMsg;
+        visual->setVisible(false);
+        return;
+    }
 
     // Calculate start Pose of delta trajectory
     geometry_msgs::Pose startPose =
-        util_localization_mgmt::subtractDeltaPose(objectState.motion_state.pose.pose, newDeltaPoseStart);
+        util_geometry_msgs::computations::subtractDeltaPose(objectState.motion_state.pose.pose, newDeltaPoseStart);
 
     // Calculate final Pose
-    geometry_msgs::Pose finalPose = util_localization_mgmt::addDeltaPose(startPose, newDeltaPose);
+    geometry_msgs::Pose finalPose = util_geometry_msgs::computations::addDeltaPose(startPose, newDeltaPose);
 
     // Transform the pose into the fixed_frame
     Ogre::Quaternion orientation;
@@ -343,8 +498,8 @@ void DesiredMotionDisplay::reCalcVisual(const simulation_only_msgs::DeltaTraject
 
     // Now set or update the contents of the visual.
     visual->setVisible(true);
-    util_rviz::setSafePosition(visual, position);
-    util_rviz::setSafeOrientation(visual, orientation);
+    util_rviz::setPositionSafely(visual, position);
+    util_rviz::setOrientationSafely(visual, orientation);
 
     // calculate and set color
     double colorDeltaTime, hue;
@@ -385,6 +540,15 @@ void DesiredMotionDisplay::createObjectProperty(object_id_type objectId) {
     // messages.
     objectPropertys_[objectId]->setShouldBeSaved(false);
     radiusPropertys_[objectId]->setShouldBeSaved(false);
+}
+
+bool DesiredMotionDisplay::objectInObjectStates(object_id_type objectId) {
+    // todo: move to utils
+    for (auto&& objectState : objectStates_->objects) {
+        if (objectState.object_id == objectId)
+            return true;
+    }
+    return false;
 }
 
 } // namespace desired_motion_rviz_plugin_ros

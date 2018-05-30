@@ -11,5 +11,8 @@ Rviz Plugin for simulation_only_msgs/DeltaTrajectoryWithID and automated_driving
 ## Usage
 * start rviz and add the plugin
 
+## Contributors
+Pascal Böhmler, Maximilian Naumann, Beija Nigl
+
 ## License
-Contact the maintainer.
+This package is distributed under the 3-Clause BSD License, see [LICENSE](LICENSE).

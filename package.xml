@@ -1,6 +1,6 @@
 <package format="2">
   <name>desired_motion_rviz_plugin_ros</name>
-  <version>0.1.0</version>
+  <version>1.0.0</version>
   <description>
      DesiredMotion plugin for RViz.
   </description>
@@ -23,7 +23,10 @@
   <depend>tf2_geometry_msgs</depend>
   <depend>automated_driving_msgs</depend>
   <depend>simulation_only_msgs</depend>
-  <depend>simulation_utils</depend>
+  <depend>util_automated_driving_msgs</depend>
+  <depend>util_geometry_msgs</depend>
+  <depend>util_simulation_only_msgs</depend>
+  <depend>util_rviz</depend>
 
   <export>
       <rviz plugin="${prefix}/plugin_description.xml"/>
