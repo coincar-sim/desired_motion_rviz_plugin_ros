@@ -50,16 +50,14 @@
 
 #include <string>
 
-#include <automated_driving_msgs/ObjectState.h>
-#include <automated_driving_msgs/ObjectStateArray.h>
-#include <simulation_only_msgs/DeltaTrajectoryWithID.h>
+#include <automated_driving_msgs/DeltaTrajectory.h>
+#include <automated_driving_msgs/MotionState.h>
+
 #include <util_rviz/util_rviz.hpp>
 
 #include "desiredmotion_visual.hpp"
 
 namespace desired_motion_rviz_plugin_ros {
-
-using object_id_type = automated_driving_msgs::ObjectState::_object_id_type;
 
 class DesiredMotionVisual;
 
@@ -98,44 +96,34 @@ private:
     std::unique_ptr<rviz::FloatProperty> maxTimeProperty_;
     std::unique_ptr<rviz::FloatProperty> colorMaxTimeProperty_;
     std::unique_ptr<rviz::RosTopicProperty> topicDTProperty_;
-    std::unique_ptr<rviz::RosTopicProperty> topicOSAProperty_;
-    std::unique_ptr<rviz::BoolProperty> objectAllProperty_;
-    std::unique_ptr<rviz::Property> radiiProperty_;
+    std::unique_ptr<rviz::RosTopicProperty> topicMSProperty_;
     std::unique_ptr<rviz::BoolProperty> plannerDebugModeProperty_;
+    std::unique_ptr<rviz::FloatProperty> radiusProperty_;
 
-    std::unordered_map<object_id_type, std::unique_ptr<rviz::BoolProperty>> objectPropertys_;
-    std::unordered_map<object_id_type, std::unique_ptr<rviz::FloatProperty>> radiusPropertys_;
+    void incomingMessageMS(const automated_driving_msgs::MotionState::ConstPtr& msg);
+    void incomingMessageDT(const automated_driving_msgs::DeltaTrajectory::ConstPtr& msg);
 
-    void incomingMessageOSA(const automated_driving_msgs::ObjectStateArray::ConstPtr& msg);
-    void incomingMessageDT(const simulation_only_msgs::DeltaTrajectoryWithID::ConstPtr& msg);
+    void processMessageMS(const automated_driving_msgs::MotionState::ConstPtr& motionState);
 
-    void processMessageOSA(const automated_driving_msgs::ObjectStateArray::ConstPtr& objectStates);
-
-    void createVisuals(const simulation_only_msgs::DeltaTrajectoryWithID::ConstPtr& deltaTrajectory,
-                       const automated_driving_msgs::ObjectState& objectState);
-    void reCalcVisual(const simulation_only_msgs::DeltaTrajectoryWithID::ConstPtr& deltaTrajectory,
-                      const automated_driving_msgs::ObjectState& objectState,
-                      object_id_type objectId,
+    void createVisuals(const automated_driving_msgs::DeltaTrajectory::ConstPtr& deltaTrajectory,
+                       const automated_driving_msgs::MotionState::ConstPtr &motionState);
+    void reCalcVisual(const automated_driving_msgs::DeltaTrajectory::ConstPtr& deltaTrajectory,
+                      const automated_driving_msgs::MotionState::ConstPtr &motionState,
                       const double currentAbsoluteTime,
                       std::shared_ptr<DesiredMotionVisual> visual);
 
-    void createObjectProperty(object_id_type objectId);
-
-    bool objectInObjectStates(object_id_type objectId);
-
 
     // Storage for the objectStates, the desiredmotions and the list of visuals.
-    std::unordered_map<object_id_type, std::vector<std::shared_ptr<DesiredMotionVisual>>> visuals_;
-    boost::shared_ptr<const automated_driving_msgs::ObjectStateArray> objectStates_;
-    std::unordered_map<object_id_type, boost::shared_ptr<const simulation_only_msgs::DeltaTrajectoryWithID>>
-        deltaTrajectorys_;
+    std::vector<std::shared_ptr<DesiredMotionVisual>> visuals_;
+    automated_driving_msgs::MotionState::ConstPtr motionState_;
+    automated_driving_msgs::DeltaTrajectory::ConstPtr deltaTrajectory_;
 
     // ros subscribers
-    ros::Subscriber subOSA_;
+    ros::Subscriber subMS_;
     ros::Subscriber subDT_;
 
     // message counter
-    uint32_t messagesReceivedOSA_ = 0;
+    uint32_t messagesReceivedMS_ = 0;
     uint32_t messagesReceivedDT_ = 0;
 
     float timeInterval_;
