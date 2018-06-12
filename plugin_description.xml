@@ -7,4 +7,12 @@
     </description>
     <message_type>simulation_only_msgs/DeltaTrajectoryWithID</message_type>
   </class>
+  <class name="desired_motion_rviz_plugin_ros/DesiredMotionSingleVehicle"
+         type="desired_motion_rviz_plugin_ros::DesiredMotionDisplaySingleVehicle"
+         base_class_type="rviz::Display">
+    <description>
+      Displays desired motions from automated_driving_msgs/DeltaTrajectory messages.
+    </description>
+    <message_type>automated_driving_msgs/DeltaTrajectory</message_type>
+  </class>
 </library>
