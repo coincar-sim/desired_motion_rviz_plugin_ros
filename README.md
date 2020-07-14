@@ -1,3 +1,5 @@
+[![Build Status](https://api.travis-ci.org/coincar-sim/desired_motion_rviz_plugin_ros.svg)](https://travis-ci.org/coincar-sim/desired_motion_rviz_plugin_ros)
+
 # desired_motion_rviz_plugin_ros
 Rviz Plugin for simulation_only_msgs/DeltaTrajectoryWithID and automated_driving_msgs/ObjectStateArray messages
 * visualizes desired motions of objects by appending the desired delta trajectory (from DeltaTrajectoryWithID) to the current pose of the respective object (from ObjectStateArray)
