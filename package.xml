@@ -1,3 +1,4 @@
+<?xml version='1.0' encoding='utf-8'?>
 <package format="2">
   <name>desired_motion_rviz_plugin_ros</name>
   <version>1.0.0</version>
@@ -5,7 +6,7 @@
      DesiredMotion plugin for RViz.
   </description>
   <license>BSD</license>
-  <maintainer email="maximilian.naumann@kit.edu">Maximilian Naumann</maintainer>
+  <maintainer email="eduardo.molinos@kit.edu">Eduardo Molinos</maintainer>
 
   <buildtool_depend>catkin</buildtool_depend>
   <build_depend>mrt_cmake_modules</build_depend>
@@ -29,7 +30,7 @@
   <depend>util_rviz</depend>
 
   <export>
-      <rviz plugin="${prefix}/plugin_description.xml"/>
-      <rosdoc config="${prefix}/rosdoc.yaml"/>
+      <rviz plugin="${prefix}/plugin_description.xml" />
+      <rosdoc config="${prefix}/rosdoc.yaml" />
   </export>
 </package>
